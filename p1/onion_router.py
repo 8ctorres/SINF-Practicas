@@ -28,12 +28,11 @@ class OnionRouter(onion.OnionSystem):
         Starts the routing process and keeps the loop working. It stops gracefully with a SIGINT.
     """
     
-    def receive_message(self, message: bytes) -> tuple[str,str] | None:  
+    def receive_message(self, rcvd_message: bytes):  
         """Receive, process and forward incoming messages
 
-        This method is called when a message is received from the broker. It first checks that
-        the message is addressed to this node (if it isn't, the method exits returning None).
-        Then it decrypts it, removing one of the layers.
+        This method is called when a message is received from the broker.
+        First, it decrypts it, removing one of the layers.
 
         If the next layer has the "end" flag, it means that this node is the intended recipient
         of the message. If this is the case, it checks for a sender identification (there can be
@@ -45,7 +44,7 @@ class OnionRouter(onion.OnionSystem):
 
         Parameters
         ----------
-        message: bytes
+        recvd_message: bytes
             The received message
 
         Returns
@@ -54,21 +53,15 @@ class OnionRouter(onion.OnionSystem):
             A tuple containing the sender id and the message, both as strings
         """
 
+        print()
         onion.logging.info("Received incoming message")
-        # Extract user_id of the recipient
-        msg_dest = message[:5].strip(b'\x00')
-        if msg_dest != self.user_id.strip(b'\x00'):
-            #Message is not addressed to this node. Ignore it
-            onion.logging.warn("Received message addressed to node: " + msg_dest + ". Ignoring...")
-            return None
-        #First, remove the user_id
-        ciphertext = message[5:]
+        
         #Now decrypt using the node's own private key
-        message = self.decrypt_message(self.prkey, ciphertext)
+        message = self.decrypt_message(self.prkey, rcvd_message)
         onion.logging.debug("Decrypted message with private key")
         #Extract next user_id
         msg_dest = message[:5].strip(b'\x00')
-        onion.logging.debug("Next user_id is " + onion.bytes_print(message[:5]))
+        onion.logging.debug("Next user_id is " + msg_dest.decode("ASCII"))
 
         # Next, check if we are the recipients of the message, by checking for "end" as next_hop
         if (msg_dest) == b'end':
@@ -84,9 +77,11 @@ class OnionRouter(onion.OnionSystem):
             # Return the result as a tuple containing sender_id and plain text message, both as strings.
             return (sender_str, message_str)
         else:
-            onion.logging.info("Relaying message to next_node: " + onion.bytes_print(msg_dest))
-            # Send the message to the next node via MQTT
-            self.mqclient.publish(msg_dest.decode("ASCII"), message)
+            onion.logging.info("Relaying message to next_node: " + msg_dest.decode("ASCII"))
+            # Send the message to the next node via MQTT, removing the first 5 bytes
+            msg_send = message[5:]
+            self.mqclient.publish(msg_dest.decode("ASCII"), msg_send)
+            onion.logging.debug("Relayed content:" + onion.bytes_print(msg_send[:20]) + "...")
             return None
 
     def main(self):
@@ -128,9 +123,9 @@ class OnionRouter(onion.OnionSystem):
                 # Extract sender id and actual payload
                 (sender, payload) = res
                 # Print the message to the console
-                print("Received message from ", sender)
+                print("Received message from", sender)
                 print(payload)
-                print('\n\n\n\n')
+                print('\n')
 
         # Set the helper function as the callback point for the MQTT Client
         self.mqclient.on_message = mqtt_on_message

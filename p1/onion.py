@@ -1,6 +1,6 @@
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import load_ssh_private_key
-from cryptography.hazmat.primitives.serialization import load_ssh_public_key
+from cryptography.hazmat.primitives.serialization import load_ssh_private_key, load_ssh_public_key
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -52,6 +52,9 @@ import sys
             logging configuration and some global definitions (MQTT server ip, username and passwd)
         - pubkeys: Contains the dictionary with user ids and public keys for other nodes.
 
+    
+    Tested successfully with: Ignacio Borregán, Daniel Feito and David Fernández    
+    
     More detailed documentation of how each component works is available below.
 """
 
@@ -60,7 +63,7 @@ import sys
 import logging
 
 logging.basicConfig(
-    level=logging.DEBUG, # <-- Change to INFO or WARN to reduce the amount of messages displayed
+    level=logging.INFO, # <-- Change to INFO or WARN to reduce the amount of messages displayed
     format="%(funcName)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -119,7 +122,7 @@ def bytes_print(b: bytes) -> str:
         A string containing the printable version of the input bytes    
     """
 
-    return " ".join([hex(byte) if byte < 33 else chr(byte) for byte in b])
+    return " ".join([hex(byte) if byte < 33 or byte > 128 else chr(byte) for byte in b])
 
 class OnionNode:
     """A Bean-like object to store a user_id <-> public key association

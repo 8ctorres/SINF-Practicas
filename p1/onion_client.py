@@ -64,10 +64,12 @@ class OnionClient(onion.OnionSystem):
             message = node.user_id + self.encrypt_message(node.pubkey, message)
         # We now have the message with all the layers, and the first 5 bytes are the
         # user_id of the first node it's addressed to
+        first_hop = message[:5].strip(b'\x00').decode("ASCII")
+        msg_send = message[5:]
 
         # Queue the message to send to the MQTT broker
         onion.logging.debug("MQTT Publish message")
-        self.mqclient.publish(topic=message[:5].strip(b'\x00').decode("ASCII"), payload=message)
+        self.mqclient.publish(topic=first_hop, payload=msg_send)
         # Start the MQTT client with a 10 second timeout,
         # which should be more than enough to send the message
         onion.logging.debug("Start MQTT Client loop")
@@ -79,7 +81,7 @@ class OnionClient(onion.OnionSystem):
         onion.logging.debug("MQTT Disconnected")
 
         # This function returns the encoded message in a bytes object
-        return message
+        return msg_send
 
 if __name__ == "__main__":
     # Handle command line arguments
