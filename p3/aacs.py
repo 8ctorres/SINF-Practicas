@@ -5,6 +5,22 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 import sys
 
+"""
+    Information Security
+    Lab 3
+    Munics 2022/23
+    Carlos Torres Paz (UDC)
+
+    This laboratory assignment aims to implement a simplified version of an AACS system.
+    This program is able to encrypt an input file of arbitrary length using the AES128-CBC
+    cipher, and use the appropriate set of keys such that a specific set of devices will
+    be unable to decrypt the output file, but all the rest will.
+
+    For this example, all of the keys are randomly generated on program startup every time.
+    Of course, in a more complete system, there would be some persistent storage to keep
+    those keys.
+"""
+
 # Number of leaves in the tree
 # The depth of the tree depends directly on this value
 NUMBER_OF_LEAVES = 8
@@ -15,12 +31,57 @@ class NoValidKeyException(Exception):
     pass
 
 class Key():
+    """
+    Stores a 128 bit key, along with its id. The key itself is
+    randomly generated when creating the object
+
+    Attributes
+    ----------
+    id: int
+        The ID of the key
+    key: bytes
+        The key itself
+    
+    Methods
+    -------
+    None
+    """
     def __init__(self, id: int):
         self.id = id
         # Generate a random key of KEY_SIZE bits
         self.key = os.urandom(KEY_SIZE//8)
 
 class Node():
+    """
+    This class represents a Node in the tree of keys. When the
+    object is created, its key is created too.
+
+    Attributes
+    ----------
+    id: int
+        The ID of the Node
+    keys: list[Key]
+        The list of keys available on this Node. The first in the list
+        is the node's own key.
+
+    Methods
+    -------
+    add_key(key: Key) -> None
+        Adds a new key to this node
+
+    add_keys(keys: list[Key]) -> None
+        Adds a list of keys to the node
+
+    get_parent_id() -> int
+        Returns the node's parent's ID
+
+    get_sibling_id() -> int
+        Returns the node's sibling's ID
+    
+    get_key() -> Key
+        Returns the node's own key
+    """
+
     def __init__(self, id: int):
         self.id = id
         # Create this node's own key,
@@ -51,6 +112,33 @@ class Node():
         return self.keys[0]
 
 class AACSBinaryTree():
+    """
+    Represents a Binary tree used for an AACS System. When created
+    it creates all the Nodes and the Keys inside it.
+
+    Attributes
+    ----------
+    n_leaves: int
+        Number of leaves (AKA devices)
+    
+    depth: int
+        Depth of the tree
+
+    nodes: list[Node]
+        An array containing all the nodes
+
+    Methods
+    -------
+    get_node(id: int) -> Node
+        Returns the Node of a given ID
+
+    get_leaves() -> list[Node]
+        Returns a list containing the leaves
+
+    is_leaf(n: Node) -> bool
+        Returns True if the Node is a leaf of the tree
+    """
+    
     def get_node(self, id: int) -> Node:
         # This adjust for the fact that the first node (the root) has ID = 1
         return self.nodes[id-1]
@@ -77,6 +165,12 @@ class AACSBinaryTree():
 
             # Add the node to the tree in current position
             self.nodes.append(n)
+
+        # Then, remove any unnecesary nodes, so that we match the actual number of leaves
+        # that was requested, by truncating the list to the desired length.
+        self.nodes = self.nodes[:((2**self.depth)-1+self.n_leaves)]
+
+        self.n_nodes = len(self.nodes)
         
         # After generating the entire tree, each node has it's own key
         # in the first position of its list
@@ -92,6 +186,35 @@ class AACSBinaryTree():
         return n.id >= (2**self.depth)
 
 class AACSSystem():
+    """
+    Implements an AACS System
+
+    Attributes
+    ----------
+    tree. AACSBinaryTree
+        The Binary tree containing all the keys and the nodes
+
+    Methods
+    -------
+    AESencrypt(key: bytes, plaintext: bytes) -> bytes
+        Encrypts a plaintext using AES128-CBC with the given key
+
+    AESdecrypt(key: bytes, ciphertext: bytes) -> bytes
+        Decrypts a ciphertext using AES128-CBC with the given key
+
+    find_cover(s_ids: list[int]) -> list[int]
+        Finds the cover of the given nodes, and returns it as a list
+        of the IDs of the Nodes in the cover
+
+    AACSencrypt(plaintext: bytes, excluded_devices: list[int]) -> bytes
+        Encrypts a given plaintext ensuring that all devices can read
+        it, except for the excluded devices
+
+    AACSDecrypt(ciphertext: bytes, viewing_node: Node) -> bytes
+        Tries to decrypt a ciphertext on a given node. If the node can
+        decrypt it, it returns it as bytes. If it can't, it raises a
+        NoValidKeyException
+    """
     def __init__(self):
         # Create the tree, with all its nodes and keys and all
         self.tree = AACSBinaryTree(NUMBER_OF_LEAVES)
@@ -142,7 +265,10 @@ class AACSSystem():
             while node.id != 1:
                 #Add the sibling's id to the cover set, and the node's own to the "forbidden" set
                 forbidden.add(node.id)
-                cover.add(node.get_sibling_id())
+                #Only add it if the sibling actually exists
+                sibling_id = node.get_sibling_id()
+                if (sibling_id > self.tree.n_nodes):
+                    cover.add(sibling_id)
                 #For the next iteration, do the same with the node's parent
                 node = self.tree.get_node(node.get_parent_id())
         # After this we have a set which is the union of the individual covers of every node,
@@ -269,7 +395,8 @@ if __name__ == "__main__":
             if len(excluded_in) == 0:
                 excluded_devices= list()
             else:
-                excluded_devices = [int(s) for s in excluded_in.split(',')]
+                # It adds 2**depth-1 so that ID 1 means the first device, not the root node
+                excluded_devices = [int(s)+(2**aacs.tree.depth)-1 for s in excluded_in.split(',')]
 
             # Open new file for writing
             filename_out = input("Name of output file? ")
@@ -292,7 +419,7 @@ if __name__ == "__main__":
 
             # Read viewing_node
             while True:
-                viewing_node_id = int(input("Which node is used for this decryption? (Enter ID) "))
+                viewing_node_id = int(input("Which node is used for this decryption? (Enter ID) "))+(2**aacs.tree.depth)-1
                 viewing_node = aacs.tree.get_node(viewing_node_id)
                 if not aacs.tree.is_leaf(viewing_node):
                     print("Node must be a leaf of the tree")
