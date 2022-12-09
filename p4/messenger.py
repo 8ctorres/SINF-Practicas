@@ -170,7 +170,10 @@ class DHRatchet():
 
 
 class Messenger():
-    def __init__(self):
+    def __init__(self, username: str, peer_name: str):
+        # Guardamos nombre de usuario y del compañero
+        self.username = username
+        self.peer_name = peer_name
         # Instanciamos el DHRatchet
         self.ratchet = DHRatchet()
     
@@ -182,9 +185,28 @@ class Messenger():
         input("Press ENTER when both parties are ready to start")
         # Al pulsar ENTER, iniciamos el proceso de intercambio de DH
         self.ratchet.start()
+        self.ratchet.mqclient.on_message = self.receive()
 
         # TODO: Toda la parte de consola, los prompts, leer los mensajes, mostrar los mensajes recibidos...etc
-        # TODO: Que el MQTT envíe cosas
+        while True:
+            message = input("Write a message (leave blank to exit chat): ")
+            if message == '':
+                break
+            else:
+                self.send(self, message)
+
+            # TODO: Métodos encrypt y decrypt envían y reciben el mensaje correctamemte
+    
+    def send(self, plaintext):
+        ciphertext = self.ratchet.encrypt(plaintext)
+        print(plaintext)
+
+        # TODO: Pendiente ver en donde se gestiona que el ciphertext se publique en el canal del destinatario
+        return ciphertext
+
+    def receive(self, ciphertext):
+        plaintext = self.ratchet.decrypt(ciphertext)
+        print("\r" + plaintext)
 
 
 
