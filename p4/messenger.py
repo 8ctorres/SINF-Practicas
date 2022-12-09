@@ -13,6 +13,8 @@ MQTT_PASSWD = "HkxNtvLB3GC5GQRUWfsA"
 ROOT_KEY = b'+\xf5f\x9f\xb4YH\x0ef\xa1\xcas*\xe9NY'
 
 ELLIPTIC_CURVE = ec.SECP384R1()
+DH_KEY_LENGTH = 32 # 256bits
+NONCE_LENGTH = 12 # 96bits
 
 # Use a basic logging system to output information to the terminal in a more configurable
 # way than just using print() statements all over the place.
@@ -34,12 +36,6 @@ logging.basicConfig(
     Ismael Verde Costas (UDC)
 """
 
-class AESSystem():
-    def AESencrypt(key, payload):
-        pass
-    def AESdecrypt(key, payload):
-        pass
-
 class KDFRatchet():
     def __init__(self, DH_key: bytes):
         # Creamos una cadena KDF usando la clave de Diffie-Hellman como salt
@@ -60,20 +56,13 @@ class KDFRatchet():
 
 
 class DHRatchet():
-    def __init__(self):
-        # Instanciamos cliente MQTT
-        self.mqclient = paho.mqtt.client.Client()
-        # Ponemos username and password
-        self.mqclient.username_pw_set(MQTT_USERNAME, MQTT_PASSWD)
-        logging.debug("Created mqtt client")
-        # Nos conectamos al servidor
-        conn = self.mqclient.connect(MQTT_SERVER, port=1883, keepalive=60)
-        print("conn is", conn)
-        if (conn == 0):
-            logging.info("Connected to MQTT Server at "+ MQTT_SERVER)
-        else:
-            logging.error("Unable to connect to MQTT Server")
-            exit(-1)
+    def __init__(self, mqclient: paho.mqtt.client.Client, username: str, peer_name: str):
+        # Guardamos el nombre de usuario y de compañero
+        self.username = username
+        self.peer_name = peer_name
+        # Guardamos un puntero al cliente mqtt
+        # Lo vamos a utilizar para el intercambio de claves inicial
+        self.mqclient=mqclient
         
         # Generamos par de claves DH
         self.dh_sk = ec.generate_private_key(ELLIPTIC_CURVE)
@@ -88,39 +77,34 @@ class DHRatchet():
         def mqtt_on_message(client, userdata, message):
             if len(message)<25:
                 return None
-            (header, key) = (message[:24], message[24:])
-            if header == b'DH_EXCHANGE_START.PUBKEY':
+            (header, key) = (message[:17], message[17:])
+            if header == b'DH_EXCHANGE_START':
                 self.peer_dh_pk = key
                 return key
 
         self.mqclient.on_message = mqtt_on_message
+        self.mqclient.subscribe(topic=self.username+".in")
         # Loop_start inicia el bucle de eventos de MQTT en un nuevo hilo para que la ejecución
         # del programa continue
         self.mqclient.loop_start()
 
     def start(self):
         # Iniciamos el proceso de negociación
-        # Mandamos por MQTT al canal "self.peer".in la clave pública de DH (self.dh_pk)
-        topic = self.peer + ".in"
-        payload = b'DH_EXCHANGE_START.PUBKEY'+self.dh_pk
-        self.mqclient.publish(topic=topic, payload=payload)
+        # Mandamos por MQTT al topic de nuestro compañero la clave pública de DH (self.dh_pk)
+        payload = b'DH_EXCHANGE_START'+self.dh_pk
+        self.mqclient.publish(topic=self.peer_name+".in", payload=payload)
 
         # Esperamos a recibir la PK del compañero
         while (self.peer_dh_pk is None):
             time.sleep(0.1)
-        # Una vez la tenemos, dejamos de escuchar
+        # Una vez la tenemos, liberamos el control del cliente MQTT
         self.mqclient.loop_stop()
 
-        # Una vez tenemos la PK del compañero, estamos listos tanto para enviar como para recibir mensajes
-        # Cambiamos el handler de mqtt para pasar a procesar mensajes entrantes
-        def mqtt_on_message(client, userdata, message):
-            return self.receive(message)
-
-        # Reiniciamos el bucle de eventos con el nuevo handler
-        self.mqclient.on_message = mqtt_on_message
-        self.mqclient.loop_start()
-    
-    def send(self, plaintext_msg: str):
+        # Una vez tenemos la PK del compañero, estamos listos tanto para enviar
+        # como para recibir mensajes. Devolvemos el control al Messenger
+        return
+        
+    def encrypt(self, plaintext_msg: str):
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
         # Lo comprobamos con un flag de envío que guardamos como atributo de DHRatchet
         if (self.is_first_sent):
@@ -138,19 +122,37 @@ class DHRatchet():
 
         # Usamos el ratchet interno para cifrar nuestro mensaje
         nonce=os.urandom(96//8) #TODO: saber los tamaños de claves, bloques... etc
-        # Podemos meter como associated_data nuestra nueva clave pública de Diffie-Hellman
-        msg = AESGCM(self.kdf.next()).encrypt(nonce=nonce, data=plaintext_msg.encode("UTF-8"), associated_data=self.dh_pk)
+        msg = AESGCM(self.kdf.next()).encrypt(nonce=nonce, data=plaintext_msg.encode("UTF-8"), associated_data=None)
 
-        # Mandamos las dos cosas
-        return self.dh_pk + msg
+        # Vamos a enviar:
+        # - Un flag de inicio (160 bits)
+        # - Nuestra clave pública de Diffie-Hellman
+        # - El nonce del cifrado AESGCM
+        # - El mensaje cifrado
+        return b'DR_ENCRYPTED_MESSAGE' + self.dh_pk + nonce + msg
 
-    def receive(self, ciphertext_input: bytes):
+    def decrypt(self, input: bytes):
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
         # Lo comprobamos viendo si la clave pública que tenemos del compañero es la misma o no
-        
-        # Extraemos pk del compañero
-        (ciphertext_msg, new_peer_dh_pk) = ciphertext_input #TODO: Definir esta estructura de datos
 
+        flag_limit = 20
+        dh_pk_limit = flag_limit + DH_KEY_LENGTH
+        nonce_limit = dh_pk_limit + NONCE_LENGTH
+
+        # Comprobamos que la entrada tenga el tamaño adecuado. Si no, ignoramos el paquete
+        if (len(msg) < nonce_limit+1):
+            return None
+        (flag, new_peer_dh_pk, nonce, encrypted_msg) = (
+            input[:flag_limit],
+            input[flag_limit:dh_pk_limit],
+            input[dh_pk_limit:nonce_limit],
+            input[nonce_limit:]
+        )
+        # Compobamos que la flag sea correcta. Si no, ignoramos el paquete
+        if (flag != b'DR_ENCRYPTED_MESSAGE'):
+            return None
+
+        # Si este mensaje es el primero de esta cadena
         if (self.peer_dh_pk != new_peer_dh_pk):
             # Reseteamos el flag de envío ya que pasamos a modo recepción
             self.is_first_sent = True
@@ -162,10 +164,7 @@ class DHRatchet():
             self.kdf = KDFRatchet(shared_key)
 
         # Usamos el ratchet interno para descifrar el mensaje
-        nonce = b'esto lo tendre que haber sacado de algun sitio'
-        # Sacamos la clave pública de Diffie-Hellman del compañero y la autenticamos también (y la guardamos)
-        self.peer_dh_pk = b'de alguna forma lo sacaremos digo yo'
-        msg = AESGCM(self.kdf.next()).decrypt(nonce=nonce, data=ciphertext_input, associated_data=self.peer_dh_pk)
+        msg = AESGCM(self.kdf.next()).decrypt(nonce=nonce, data=encrypted_msg, associated_data=None)
         return msg
 
 
@@ -174,14 +173,26 @@ class Messenger():
         # Guardamos nombre de usuario y del compañero
         self.username = username
         self.peer_name = peer_name
-        # Instanciamos el DHRatchet
-        self.ratchet = DHRatchet()
+        # Instanciamos cliente MQTT
+        self.mqclient = paho.mqtt.client.Client()
+        # Ponemos username and password
+        self.mqclient.username_pw_set(MQTT_USERNAME, MQTT_PASSWD)
+        logging.debug("Created mqtt client")
+        # Nos conectamos al servidor
+        conn = self.mqclient.connect(MQTT_SERVER, port=1883, keepalive=60)
+        print("conn is", conn)
+        if (conn == 0):
+            logging.info("Connected to MQTT Server at "+ MQTT_SERVER)
+        else:
+            logging.error("Unable to connect to MQTT Server")
+            exit(-1)
+
+        # Instanciamos el DHRatchet y le pasamos un puntero al cliente MQTT
+        # para que pueda usarlo para el proceso de intercambio de claves, y
+        # le pasamos los username de ambas partes de la conversación
+        self.ratchet = DHRatchet(self.mqclient, self.username, self.peer_name)
     
     def start(self):
-        # Nombres de usuario para los canales de MQTT
-        self.username = input("Input username: ")
-        self.peer = input("Input peer's username: ")
-
         input("Press ENTER when both parties are ready to start")
         # Al pulsar ENTER, iniciamos el proceso de intercambio de DH
         self.ratchet.start()
@@ -212,5 +223,7 @@ class Messenger():
 
 
 if __name__ == "__main__":
-    msg = Messenger()
-    #msg.start()
+    username = input("Input username: ")
+    peer_name = input("Input peer's username: ")
+    msg = Messenger(username, peer_name)
+    msg.start()
