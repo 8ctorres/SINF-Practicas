@@ -61,6 +61,43 @@ def bytes_print(b: bytes):
     Munics 2022/23
     Carlos Torres Paz (UDC)
     Ismael Verde Costas (UDC)
+
+    Esta práctica consiste en una implementación sencilla de un mecanismo de doble Ratchet
+    como el utilizado en plataformas de mensajería instantánea como Signal o Telegram. En este caso,
+    asumimos que no va a haber nunca pérdida de paquetes, que llegan siempre en orden y que ambos
+    usuarios están online en todo momento.
+
+    El criterio para el avance de los dos ratchet es el siguiente:
+    - El ratchet simétrico (que avanza con HMAC) avanza en cada mensaje enviado y/o recibido
+    - El ratchet de Diffie-Hellman avanza cada vez que cambia el usuario que está enviando, es decir
+        mientras el mismo usuario esté enviando varios mensajes seguidos no se hace nada. Cuando el otro
+        usuario responda, se avanza.
+
+    Por este motivo, la aplicación no necesita mantener dos ratchets simétricos (envío y recepción), ya que
+    al cambiar de envío a recepción se regeneran y siempre habría uno que no llegaría a usarse nunca (esto
+    cambiaría en caso de considerar paquetes perdidos, fuera de orden... etc). Por este motivo la aplicación
+    solo mantiene un ratchet simétrico en un momento dado (o bien el de envío, o bien el de recepción).
+
+    El funcionamiento de la aplicación es el siguiente:
+
+    - Se lanza y se indica el nombre de usuario propio y el nombre del usuario de nuestro interlocutor
+    - En ese momento la aplicación inicia la escucha para el primer intercambio Diffie-Hellman
+    - Cuando ambos usuarios están online, se pulsa ENTER para empezar. En ese momento la aplicación
+        envía su clave DH pública, finalizando el intercambio DH inicial.
+    - A partir de este punto, cualquier usuario puede enviar un mensaje en cualquier momento.
+    - La aplicación siempre envía junto con cada mensaje, el nonce de cifrado, la clave pública DH más
+        reciente del remitente y un flag inicial.
+    - Si es el primer mensaje enviado/recibido se realiza todo el proceso de intercambio (usando la clave
+        que acabamos recibir junto con el mensaje), se regenera el ratchet simétrico y se descifra.
+    - Si no es el primer mensaje, simplemente se avanza el ratchet simétrico para obtener una nueva clave.
+
+    Ctrl+C cierra la aplicación de forma controlada.
+
+    Junto con la aplicación, proporcionamos una pequeña utilidad "mqtt_sniffer" cuyo propósito es simplemente
+    suscribirse a los topics indicados en el servidor MQTT y mostrar los mensajes según pasan por el servidor.
+    Con esto vemos que efectivamente todo el contenido está cifrado y que un tercero con acceso al servidor no
+    podría leer las conversaciones.
+    
 """
 
 class KDFRatchet():
