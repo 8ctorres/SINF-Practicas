@@ -31,7 +31,7 @@ NONCE_LENGTH = 12 # 96bits
 import logging
 
 logging.basicConfig(
-    level=logging.DEBUG, # <-- Change to INFO or WARN to reduce the amount of messages displayed
+    level=logging.INFO, # <-- Change to INFO or WARN to reduce the amount of messages displayed
     format="%(funcName)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -121,8 +121,9 @@ class DHRatchet():
         logging.debug("Generated DH keypair")
         # Creamos un atributo para guardar la clave pública del compañero
         self.peer_dh_pk = None
-        # Creamos un flag para trackear si estamos en proceso de envío o de recepción
+        # Creamos flags para trackear si estamos en proceso de envío y de recepción
         self.is_first_sent = True
+        self.is_first_rcvd = True
 
         # Nos ponemos a esperar para recibir la clave pública del compañero
         # Si recibimos una clave pública, la guardamos en el atributo self.peer_dh_pk
@@ -165,7 +166,11 @@ class DHRatchet():
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
         # Lo comprobamos con un flag de envío que guardamos como atributo de DHRatchet
         if (self.is_first_sent):
+            # Reseteamos el flag de recepción, ya que pasamos a modo envío, y
+            # ponemos a False el de envío
+            self.is_first_rcvd = True
             self.is_first_sent = False
+
             # En el primer mensaje que enviamos, generamos un nuevo par de claves DH y mandamos
             # la pública al compañero junto con el mensaje
             logging.debug("Performing Diffie-Hellman Key Exchange...")
@@ -215,9 +220,13 @@ class DHRatchet():
             return None
 
         # Si este mensaje es el primero de esta cadena
-        if (self.peer_dh_pk != serialization.load_der_public_key(new_peer_dh_pk)):
+        # Llevamos un flag booleano para esta comprobación
+        if (self.is_first_rcvd):
             # Reseteamos el flag de envío ya que pasamos a modo recepción
             self.is_first_sent = True
+            # Ponemos a False el flag de recepción
+            self.is_first_rcvd = False
+
             # Guardamos la nueva clave
             logging.debug("Received serialized public key:")
             logging.debug(bytes_print(new_peer_dh_pk))
@@ -293,15 +302,12 @@ class Messenger():
         ciphertext = self.ratchet.encrypt(plaintext.encode(TEXT_ENCODING))
         logging.debug("Sending encrypted packet:")
         logging.debug(bytes_print(ciphertext))
-        #ciphertext=plaintext.encode(TEXT_ENCODING)
         self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
-        #print(self.username + ": " + plaintext, end='\n')
 
     def receive(self, ciphertext):
         logging.debug("Received incoming packet:")
-        logging.debug(ciphertext)
+        logging.debug(bytes_print(ciphertext))
         plaintext = self.ratchet.decrypt(ciphertext).decode(TEXT_ENCODING)
-        #plaintext = ciphertext.decode(TEXT_ENCODING)
         print('\r' + self.peer_name + ": " + plaintext, end='\n')
 
 
