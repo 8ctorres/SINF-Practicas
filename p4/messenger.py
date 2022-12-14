@@ -77,9 +77,10 @@ class DHRatchet():
         # Nos ponemos a esperar para recibir la clave pública del compañero
         # Si recibimos una clave pública, la guardamos en el atributo self.peer_dh_pk
         def mqtt_on_message(client, userdata, message):
-            if len(message)<25:
+            msg = message.payload
+            if len(msg)<25:
                 return None
-            (header, key) = (message[:17], message[17:])
+            (header, key) = (msg[:17], msg[17:])
             if header == b'DH_EXCHANGE_START':
                 self.peer_dh_pk = serialization.load_der_public_key(key)
                 return key
@@ -201,7 +202,7 @@ class Messenger():
 
         #Handler para la recepción de mensajes
         def mqtt_recv_message(client,userdata,message):
-            self.receive(message)
+            self.receive(message.payload)
 
         # Registramos handler MQTT
         self.ratchet.mqclient.on_message = mqtt_recv_message
