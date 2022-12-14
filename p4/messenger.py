@@ -23,6 +23,7 @@ TEXT_ENCODING = "UTF-8"
 ELLIPTIC_CURVE = ec.SECP384R1()
 KDF_KEY_LENGTH = 32 # 2x128 bits
 DH_KEY_LENGTH = 48 # 384bits
+DH_ENCODED_KEY_LENGTH = 120 #bytes
 NONCE_LENGTH = 12 # 96bits
 
 # Use a basic logging system to output information to the terminal in a more configurable
@@ -162,7 +163,7 @@ class DHRatchet():
 
         # Vamos a enviar:
         # - Un flag de inicio (160 bits)
-        # - Nuestra clave pública de Diffie-Hellman (384 bits)
+        # - Nuestra clave pública de Diffie-Hellman
         # - El nonce del cifrado AESGCM (96 bits)
         # - El mensaje cifrado (el resto)
         return b'DR_ENCRYPTED_MESSAGE' + self.dh_pk.public_bytes(encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo) + nonce + msg
@@ -172,11 +173,11 @@ class DHRatchet():
         # Lo comprobamos viendo si la clave pública que tenemos del compañero es la misma o no
 
         flag_limit = len(b'DR_ENCRYPTED_MESSAGE') # 160 bits
-        dh_pk_limit = flag_limit + DH_KEY_LENGTH
+        dh_pk_limit = flag_limit + DH_ENCODED_KEY_LENGTH
         nonce_limit = dh_pk_limit + NONCE_LENGTH
 
         # Comprobamos que la entrada tenga el tamaño adecuado. Si no, ignoramos el paquete
-        if (len(msg) < nonce_limit+1):
+        if (len(input) < nonce_limit+1):
             return None
         (flag, new_peer_dh_pk, nonce, encrypted_msg) = (
             input[:flag_limit],
