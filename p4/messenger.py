@@ -66,7 +66,7 @@ class DHRatchet():
         
         # Generamos par de claves DH
         self.dh_sk = ec.generate_private_key(ELLIPTIC_CURVE)
-        self.dh_pk = self.sk.public_key()
+        self.dh_pk = self.dh_sk.public_key()
         # Creamos un atributo para guardar la clave pública del compañero
         self.peer_dh_pk = None
         # Creamos un flag para trackear si estamos en proceso de envío o de recepción
@@ -180,7 +180,7 @@ class Messenger():
         logging.debug("Created mqtt client")
         # Nos conectamos al servidor
         conn = self.mqclient.connect(MQTT_SERVER, port=1883, keepalive=60)
-        print("conn is", conn)
+        logging.debug("conn is" + str(conn))
         if (conn == 0):
             logging.info("Connected to MQTT Server at "+ MQTT_SERVER)
         else:
