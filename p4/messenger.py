@@ -1,6 +1,7 @@
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.hashes import SHA512
+from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.hmac import HMAC
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -12,10 +13,15 @@ MQTT_SERVER = "3.250.118.218"
 MQTT_USERNAME = "sinf"
 MQTT_PASSWD = "HkxNtvLB3GC5GQRUWfsA"
 
-ROOT_KEY = b'+\xf5f\x9f\xb4YH\x0ef\xa1\xcas*\xe9NY'
+INITIAL_ROOT_KEY = b'+\xf5f\x9f\xb4YH\x0ef\xa1\xcas*\xe9NY' #128 bits
+HKDF_INFO_STRING = b'SINF_LAB4_CARLOSTORRES_ISMAVERDE'
+
+HMAC_CHAIN_STRING = b'\x01'
+HMAC_MSG_STRING = b'\x02'
 
 TEXT_ENCODING = "UTF-8"
 ELLIPTIC_CURVE = ec.SECP384R1()
+KDF_KEY_LENGTH = 32 # 2x128 bits
 DH_KEY_LENGTH = 48 # 384bits
 NONCE_LENGTH = 12 # 96bits
 
@@ -40,22 +46,38 @@ logging.basicConfig(
 """
 
 class KDFRatchet():
-    def __init__(self, DH_key: bytes):
-        # Creamos una cadena KDF usando la clave de Diffie-Hellman como salt
-        # y la root key como primera clave
+    def __init__(self, root_key: bytes):
+        # Creamos una cadena KDF usando la root_key
         self.hkdf = HKDF(
-            algorithm=SHA512(),
-            length=64,
-            salt=ROOT_KEY,
-            info=b'SINF_LAB4_CARLOSTORRES_ISMAVERDE'
+            algorithm=SHA256(),
+            length=KDF_KEY_LENGTH,
+            salt=root_key,
+            info=HKDF_INFO_STRING
         )
-        self.current_key = self.hkdf.derive(DH_key)
+    
+    def initialize(self, DH_key: bytes):
+        # Inicializamos el ratchet simétrico con la clave compartida Diffie-Hellman,
+        # extrayendo una nueva root key, que devolvemos y una nueva chain key para usar en adelante
+        derived_key = self.hkdf.derive(DH_key)
+        # Extraemos de la clave derivada, de 256 bits, los primeros 128 para la siguiente root key
+        # y los siguientes 128 para la chain key
+        self.current_chain_key = derived_key[(KDF_KEY_LENGTH//2):]
+        return derived_key[:(KDF_KEY_LENGTH//2)] #Se devuelve la root key y el DHRatchet la guarda
 
     def next(self) -> bytes:
         # En cada llamada a next(), avanzamos un paso el ratchet
-        # Sacamos una nueva clave, la devolvemos y nos la guardamos para el siguiente next()
-        self.current_key = self.hkdf.derive(self.current_key)
-        return self.current_key
+        # Instanciamos una cadena HMAC-SHA256 con la chain_key actual
+        hmac_chain = HMAC(key=self.current_chain_key, algorithm=SHA256())
+        # Nos guardamos una copia
+        hmac_message = hmac_chain.copy()
+
+        # Extraemos la siguiente chain_key y la guardamos
+        hmac_chain.update(HMAC_CHAIN_STRING)
+        self.current_chain_key = hmac_chain.finalize()
+
+        # Extraemos la siguiente message_key y la devolvemos
+        hmac_message.update(HMAC_MSG_STRING)
+        return hmac_message.finalize()
 
 
 class DHRatchet():
@@ -66,6 +88,9 @@ class DHRatchet():
         # Guardamos un puntero al cliente mqtt
         # Lo vamos a utilizar para el intercambio de claves inicial
         self.mqclient=mqclient
+
+        # Guardamos la root key y la inicializamos al valor preestablecido
+        self.root_key = INITIAL_ROOT_KEY
         
         # Generamos par de claves DH
         self.dh_sk = ec.generate_private_key(ELLIPTIC_CURVE)
@@ -126,8 +151,10 @@ class DHRatchet():
             # Realizamos el intercambio Diffie-Hellman usando la clave pública que teníamos de antes del compañero
             shared_key = self.dh_sk.exchange(ec.ECDH(), self.peer_dh_pk)
 
-            # Creamos un nuevo ratchet interno con esta nueva clave compartida DH
-            self.kdf = KDFRatchet(shared_key)
+            # Creamos un nuevo ratchet interno y lo inicializamos con nuestra nueva clave compartida DH
+            self.kdf = KDFRatchet(self.root_key)
+            # En el proceso de inicialización, ya nos guardamos la nueva root_key para inicializar el siguiente ratchet
+            self.root_key = self.kdf.initialize(shared_key)
 
         # Usamos el ratchet interno para cifrar nuestro mensaje
         nonce=os.urandom(96//8)
@@ -135,16 +162,16 @@ class DHRatchet():
 
         # Vamos a enviar:
         # - Un flag de inicio (160 bits)
-        # - Nuestra clave pública de Diffie-Hellman
-        # - El nonce del cifrado AESGCM
-        # - El mensaje cifrado
+        # - Nuestra clave pública de Diffie-Hellman (384 bits)
+        # - El nonce del cifrado AESGCM (96 bits)
+        # - El mensaje cifrado (el resto)
         return b'DR_ENCRYPTED_MESSAGE' + self.dh_pk + nonce + msg
 
     def decrypt(self, input: bytes):
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
         # Lo comprobamos viendo si la clave pública que tenemos del compañero es la misma o no
 
-        flag_limit = 20
+        flag_limit = len(b'DR_ENCRYPTED_MESSAGE') # 160 bits
         dh_pk_limit = flag_limit + DH_KEY_LENGTH
         nonce_limit = dh_pk_limit + NONCE_LENGTH
 
@@ -169,8 +196,9 @@ class DHRatchet():
             self.peer_dh_pk = new_peer_dh_pk
             # Hacemos el intercambio Diffie-Hellmann, obtenemos clave compartida
             shared_key = self.dh_sk.exchange(ec.ECDH(), self.peer_dh_pk)
-            # Regeneramos ratchet interno
-            self.kdf = KDFRatchet(shared_key)
+            # Regeneramos ratchet interno y guardamos la siguiente root_key
+            self.kdf = KDFRatchet(self.root_key)
+            self.root_key = self.kdf.initialize(shared_key)
 
         # Usamos el ratchet interno para descifrar el mensaje
         msg = AESGCM(self.kdf.next()).decrypt(nonce=nonce, data=encrypted_msg, associated_data=None)
