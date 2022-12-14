@@ -3,7 +3,7 @@ from cryptography.hazmat.primitives.hashes import SHA512
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import paho.mqtt.client
-import sys, time, os
+import sys, time, os, signal
 
 #MQTT_SERVER = "mastropiero.det.uvigo.es"
 MQTT_SERVER = "3.250.118.218"
@@ -13,7 +13,7 @@ MQTT_PASSWD = "HkxNtvLB3GC5GQRUWfsA"
 ROOT_KEY = b'+\xf5f\x9f\xb4YH\x0ef\xa1\xcas*\xe9NY'
 
 ELLIPTIC_CURVE = ec.SECP384R1()
-DH_KEY_LENGTH = 32 # 256bits
+DH_KEY_LENGTH = 48 # 384bits
 NONCE_LENGTH = 12 # 96bits
 
 # Use a basic logging system to output information to the terminal in a more configurable
@@ -42,7 +42,7 @@ class KDFRatchet():
         # y la root key como primera clave
         self.hkdf = HKDF(
             algorithm=SHA512(),
-            length=16,
+            length=64,
             salt=ROOT_KEY,
             info=b'SINF_LAB4_CARLOSTORRES_ISMAVERDE'
         )
@@ -121,7 +121,7 @@ class DHRatchet():
             self.kdf = KDFRatchet(shared_key)
 
         # Usamos el ratchet interno para cifrar nuestro mensaje
-        nonce=os.urandom(96//8) #TODO: saber los tamaños de claves, bloques... etc
+        nonce=os.urandom(96//8)
         msg = AESGCM(self.kdf.next()).encrypt(nonce=nonce, data=plaintext_msg.encode("UTF-8"), associated_data=None)
 
         # Vamos a enviar:
@@ -196,30 +196,40 @@ class Messenger():
         input("Press ENTER when both parties are ready to start")
         # Al pulsar ENTER, iniciamos el proceso de intercambio de DH
         self.ratchet.start()
-        self.ratchet.mqclient.on_message = self.receive()
 
-        # TODO: Toda la parte de consola, los prompts, leer los mensajes, mostrar los mensajes recibidos...etc
+        #Handler para la recepción de mensajes
+        def mqtt_recv_message(client,userdata,message):
+            self.receive(message)
+
+        # Registramos handler MQTT
+        self.ratchet.mqclient.on_message = mqtt_recv_message
+
+        # Interceptamos el Ctrl+C para cerrar el programa correctamente
+        def sigint_handler(signum, frame):
+            print("Exiting...")
+            logging.info("SIGINT Received. Disconnecting...")
+            self.mqclient.disconnect()
+            return
+            #sys.exit(0)
+
+        # Registramos el handler con la librería de signals
+        signal.signal(signal.SIGINT, sigint_handler)
+
+        # Bucle principal de la aplicación
         while True:
-            message = input("Write a message (leave blank to exit chat): ")
-            if message == '':
-                break
-            else:
-                self.send(self, message)
-
-            # TODO: Métodos encrypt y decrypt envían y reciben el mensaje correctamemte
+            message = input("> ")
+            self.send(self, message)
     
     def send(self, plaintext):
-        ciphertext = self.ratchet.encrypt(plaintext)
+        #ciphertext = self.ratchet.encrypt(plaintext)
+        ciphertext=plaintext
+        self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
         print(plaintext)
 
-        # TODO: Pendiente ver en donde se gestiona que el ciphertext se publique en el canal del destinatario
-        return ciphertext
-
     def receive(self, ciphertext):
-        plaintext = self.ratchet.decrypt(ciphertext)
-        print("\r" + plaintext)
-
-
+        #plaintext = self.ratchet.decrypt(ciphertext)
+        plaintext = ciphertext
+        print("\r" + "<" + plaintext)
 
 
 if __name__ == "__main__":
