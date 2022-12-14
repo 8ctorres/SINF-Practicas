@@ -69,6 +69,7 @@ class DHRatchet():
         # Generamos par de claves DH
         self.dh_sk = ec.generate_private_key(ELLIPTIC_CURVE)
         self.dh_pk = self.dh_sk.public_key()
+        logging.debug("Generated DH keypair")
         # Creamos un atributo para guardar la clave pública del compañero
         self.peer_dh_pk = None
         # Creamos un flag para trackear si estamos en proceso de envío o de recepción
@@ -85,6 +86,7 @@ class DHRatchet():
                 self.peer_dh_pk = serialization.load_der_public_key(key)
                 return key
 
+        logging.debug("Waiting for peer's pubkey in mqtt topic " + self.username + ".in")
         self.mqclient.on_message = mqtt_on_message
         self.mqclient.subscribe(topic=self.username+".in")
         # Loop_start inicia el bucle de eventos de MQTT en un nuevo hilo para que la ejecución
@@ -94,6 +96,8 @@ class DHRatchet():
     def start(self):
         # Iniciamos el proceso de negociación
         # Mandamos por MQTT al topic de nuestro compañero la clave pública de DH (self.dh_pk)
+        logging.debug("Start Diffie-Hellman key exchange")
+        logging.debug("Sending public key via MQTT topic " + self.peer_name+".in")
         payload = b'DH_EXCHANGE_START'+self.dh_pk.public_bytes(encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo)
         self.mqclient.publish(topic=self.peer_name+".in", payload=payload)
 
@@ -105,6 +109,7 @@ class DHRatchet():
 
         # Una vez tenemos la PK del compañero, estamos listos tanto para enviar
         # como para recibir mensajes. Devolvemos el control al Messenger
+        logging.info("Completed initial Diffie-Hellmann exchange")
         return
         
     def encrypt(self, plaintext_msg: str):
@@ -212,8 +217,7 @@ class Messenger():
             print("Exiting...")
             logging.info("SIGINT Received. Disconnecting...")
             self.mqclient.disconnect()
-            return
-            #sys.exit(0)
+            sys.exit(0)
 
         # Registramos el handler con la librería de signals
         signal.signal(signal.SIGINT, sigint_handler)
@@ -221,7 +225,7 @@ class Messenger():
         # Bucle principal de la aplicación
         while True:
             message = input("> ")
-            self.send(self, message)
+            self.send(message)
     
     def send(self, plaintext):
         #ciphertext = self.ratchet.encrypt(plaintext)
