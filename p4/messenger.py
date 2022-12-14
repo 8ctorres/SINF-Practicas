@@ -2,6 +2,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.hashes import SHA512
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 import paho.mqtt.client
 import sys, time, os, signal
 
@@ -79,7 +81,7 @@ class DHRatchet():
                 return None
             (header, key) = (message[:17], message[17:])
             if header == b'DH_EXCHANGE_START':
-                self.peer_dh_pk = key
+                self.peer_dh_pk = serialization.load_der_public_key(key)
                 return key
 
         self.mqclient.on_message = mqtt_on_message
@@ -91,7 +93,7 @@ class DHRatchet():
     def start(self):
         # Iniciamos el proceso de negociación
         # Mandamos por MQTT al topic de nuestro compañero la clave pública de DH (self.dh_pk)
-        payload = b'DH_EXCHANGE_START'+self.dh_pk
+        payload = b'DH_EXCHANGE_START'+self.dh_pk.public_bytes(encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo)
         self.mqclient.publish(topic=self.peer_name+".in", payload=payload)
 
         # Esperamos a recibir la PK del compañero
