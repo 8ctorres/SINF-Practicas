@@ -14,6 +14,7 @@ MQTT_PASSWD = "HkxNtvLB3GC5GQRUWfsA"
 
 ROOT_KEY = b'+\xf5f\x9f\xb4YH\x0ef\xa1\xcas*\xe9NY'
 
+TEXT_ENCODING = "UTF-8"
 ELLIPTIC_CURVE = ec.SECP384R1()
 DH_KEY_LENGTH = 48 # 384bits
 NONCE_LENGTH = 12 # 96bits
@@ -230,13 +231,13 @@ class Messenger():
     
     def send(self, plaintext):
         #ciphertext = self.ratchet.encrypt(plaintext)
-        ciphertext=plaintext
+        ciphertext=plaintext.encode(TEXT_ENCODING)
         self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
         print(plaintext)
 
     def receive(self, ciphertext):
         #plaintext = self.ratchet.decrypt(ciphertext)
-        plaintext = ciphertext
+        plaintext = ciphertext.decode(TEXT_ENCODING)
         print("\r" + "<" + plaintext)
 
 
