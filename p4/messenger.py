@@ -158,7 +158,7 @@ class DHRatchet():
 
         # Usamos el ratchet interno para cifrar nuestro mensaje
         nonce=os.urandom(96//8)
-        msg = AESGCM(self.kdf.next()).encrypt(nonce=nonce, data=plaintext_msg.encode("UTF-8"), associated_data=None)
+        msg = AESGCM(self.kdf.next()).encrypt(nonce=nonce, data=plaintext_msg, associated_data=None)
 
         # Vamos a enviar:
         # - Un flag de inicio (160 bits)
@@ -217,7 +217,7 @@ class Messenger():
         logging.debug("Created mqtt client")
         # Nos conectamos al servidor
         conn = self.mqclient.connect(MQTT_SERVER, port=1883, keepalive=60)
-        logging.debug("conn is" + str(conn))
+        logging.debug("conn is " + str(conn))
         if (conn == 0):
             logging.info("Connected to MQTT Server at "+ MQTT_SERVER)
         else:
@@ -259,14 +259,14 @@ class Messenger():
             self.send(message)
     
     def send(self, plaintext):
-        #ciphertext = self.ratchet.encrypt(plaintext)
-        ciphertext=plaintext.encode(TEXT_ENCODING)
+        ciphertext = self.ratchet.encrypt(plaintext.encode(TEXT_ENCODING))
+        #ciphertext=plaintext.encode(TEXT_ENCODING)
         self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
         #print(self.username + ": " + plaintext, end='\n')
 
     def receive(self, ciphertext):
-        #plaintext = self.ratchet.decrypt(ciphertext)
-        plaintext = ciphertext.decode(TEXT_ENCODING)
+        plaintext = self.ratchet.decrypt(ciphertext.decode(TEXT_ENCODING))
+        #plaintext = ciphertext.decode(TEXT_ENCODING)
         print('\r' + self.peer_name + ": " + plaintext, end='\n')
 
 
