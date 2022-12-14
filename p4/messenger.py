@@ -138,7 +138,7 @@ class DHRatchet():
         logging.info("Completed initial Diffie-Hellmann exchange")
         return
         
-    def encrypt(self, plaintext_msg: str):
+    def encrypt(self, plaintext_msg: bytes):
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
         # Lo comprobamos con un flag de envío que guardamos como atributo de DHRatchet
         if (self.is_first_sent):
@@ -265,7 +265,7 @@ class Messenger():
         #print(self.username + ": " + plaintext, end='\n')
 
     def receive(self, ciphertext):
-        plaintext = self.ratchet.decrypt(ciphertext.decode(TEXT_ENCODING))
+        plaintext = self.ratchet.decrypt(ciphertext).decode(TEXT_ENCODING)
         #plaintext = ciphertext.decode(TEXT_ENCODING)
         print('\r' + self.peer_name + ": " + plaintext, end='\n')
 
