@@ -165,7 +165,7 @@ class DHRatchet():
         # - Nuestra clave pública de Diffie-Hellman (384 bits)
         # - El nonce del cifrado AESGCM (96 bits)
         # - El mensaje cifrado (el resto)
-        return b'DR_ENCRYPTED_MESSAGE' + self.dh_pk + nonce + msg
+        return b'DR_ENCRYPTED_MESSAGE' + self.dh_pk.public_bytes(encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo) + nonce + msg
 
     def decrypt(self, input: bytes):
         # Si es el primer mensaje de este batch, tenemos que regenerar el Ratchet
@@ -193,7 +193,7 @@ class DHRatchet():
             # Reseteamos el flag de envío ya que pasamos a modo recepción
             self.is_first_sent = True
             # Guardamos la nueva clave
-            self.peer_dh_pk = new_peer_dh_pk
+            self.peer_dh_pk = serialization.load_der_public_key(new_peer_dh_pk)
             # Hacemos el intercambio Diffie-Hellmann, obtenemos clave compartida
             shared_key = self.dh_sk.exchange(ec.ECDH(), self.peer_dh_pk)
             # Regeneramos ratchet interno y guardamos la siguiente root_key
