@@ -38,6 +38,23 @@ logging.basicConfig(
     ]
 )
 
+
+def bytes_print(b: bytes):
+    """Takes a bytes object and returns a pretty-printable string
+
+    Takes a bytes object and for each byte, prints the hexadecimal representation,
+    all separated by a space between each byte, in columns of 32 bytes.
+    """
+    s = ""
+
+    for i in range(len(b)):
+        h = hex(b[i])[2:] 
+        s = s + (h if len(h) == 2 else "0" + h) + " "
+        if (i+1) % 32 == 0:
+            s = s + "\n"
+
+    return s
+
 """
     Information Security
     Lab 4
@@ -55,6 +72,8 @@ class KDFRatchet():
             salt=root_key,
             info=HKDF_INFO_STRING
         )
+        logging.debug("Creating KDF ratchet with RK: ")
+        logging.debug(bytes_print(root_key))
     
     def initialize(self, DH_key: bytes):
         # Inicializamos el ratchet simétrico con la clave compartida Diffie-Hellman,
@@ -62,12 +81,15 @@ class KDFRatchet():
         derived_key = self.hkdf.derive(DH_key)
         # Extraemos de la clave derivada, de 256 bits, los primeros 128 para la siguiente root key
         # y los siguientes 128 para la chain key
+        logging.debug("Initialized symmetrical ratchet. Derived key:")
+        logging.debug(bytes_print(derived_key))
         self.current_chain_key = derived_key[(KDF_KEY_LENGTH//2):]
         return derived_key[:(KDF_KEY_LENGTH//2)] #Se devuelve la root key y el DHRatchet la guarda
 
     def next(self) -> bytes:
         # En cada llamada a next(), avanzamos un paso el ratchet
         # Instanciamos una cadena HMAC-SHA256 con la chain_key actual
+        logging.debug("Symmetrical ratchet new step")
         hmac_chain = HMAC(key=self.current_chain_key, algorithm=SHA256())
         # Nos guardamos una copia
         hmac_message = hmac_chain.copy()
@@ -146,11 +168,14 @@ class DHRatchet():
             self.is_first_sent = False
             # En el primer mensaje que enviamos, generamos un nuevo par de claves DH y mandamos
             # la pública al compañero junto con el mensaje
+            logging.debug("Performing Diffie-Hellman Key Exchange...")
             self.dh_sk = ec.generate_private_key(ELLIPTIC_CURVE)
             self.dh_pk = self.dh_sk.public_key()
 
             # Realizamos el intercambio Diffie-Hellman usando la clave pública que teníamos de antes del compañero
             shared_key = self.dh_sk.exchange(ec.ECDH(), self.peer_dh_pk)
+            logging.debug("DH Shared Key:")
+            logging.debug(bytes_print(shared_key))
 
             # Creamos un nuevo ratchet interno y lo inicializamos con nuestra nueva clave compartida DH
             self.kdf = KDFRatchet(self.root_key)
@@ -190,13 +215,18 @@ class DHRatchet():
             return None
 
         # Si este mensaje es el primero de esta cadena
-        if (self.peer_dh_pk != new_peer_dh_pk):
+        if (self.peer_dh_pk != serialization.load_der_public_key(new_peer_dh_pk)):
             # Reseteamos el flag de envío ya que pasamos a modo recepción
             self.is_first_sent = True
             # Guardamos la nueva clave
+            logging.debug("Received serialized public key:")
+            logging.debug(bytes_print(new_peer_dh_pk))
             self.peer_dh_pk = serialization.load_der_public_key(new_peer_dh_pk)
             # Hacemos el intercambio Diffie-Hellmann, obtenemos clave compartida
+            logging.debug("Performing DH Key exchange")
             shared_key = self.dh_sk.exchange(ec.ECDH(), self.peer_dh_pk)
+            logging.debug("Shared key:")
+            logging.debug(bytes_print(shared_key))
             # Regeneramos ratchet interno y guardamos la siguiente root_key
             self.kdf = KDFRatchet(self.root_key)
             self.root_key = self.kdf.initialize(shared_key)
@@ -261,11 +291,15 @@ class Messenger():
     
     def send(self, plaintext):
         ciphertext = self.ratchet.encrypt(plaintext.encode(TEXT_ENCODING))
+        logging.debug("Sending encrypted packet:")
+        logging.debug(bytes_print(ciphertext))
         #ciphertext=plaintext.encode(TEXT_ENCODING)
         self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
         #print(self.username + ": " + plaintext, end='\n')
 
     def receive(self, ciphertext):
+        logging.debug("Received incoming packet:")
+        logging.debug(plaintext)
         plaintext = self.ratchet.decrypt(ciphertext).decode(TEXT_ENCODING)
         #plaintext = ciphertext.decode(TEXT_ENCODING)
         print('\r' + self.peer_name + ": " + plaintext, end='\n')
