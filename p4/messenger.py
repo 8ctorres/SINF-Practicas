@@ -254,19 +254,20 @@ class Messenger():
 
         # Bucle principal de la aplicación
         while True:
-            message = input("> ")
+            print()
+            message = input(self.username + ": ")
             self.send(message)
     
     def send(self, plaintext):
         #ciphertext = self.ratchet.encrypt(plaintext)
         ciphertext=plaintext.encode(TEXT_ENCODING)
         self.mqclient.publish(topic=self.peer_name+".in", payload=ciphertext)
-        print(plaintext)
+        #print(self.username + ": " + plaintext, end='\n')
 
     def receive(self, ciphertext):
         #plaintext = self.ratchet.decrypt(ciphertext)
         plaintext = ciphertext.decode(TEXT_ENCODING)
-        print("\r" + "<" + plaintext)
+        print('\r' + self.peer_name + ": " + plaintext, end='\n')
 
 
 if __name__ == "__main__":
