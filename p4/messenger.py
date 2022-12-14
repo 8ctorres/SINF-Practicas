@@ -299,7 +299,7 @@ class Messenger():
 
     def receive(self, ciphertext):
         logging.debug("Received incoming packet:")
-        logging.debug(plaintext)
+        logging.debug(ciphertext)
         plaintext = self.ratchet.decrypt(ciphertext).decode(TEXT_ENCODING)
         #plaintext = ciphertext.decode(TEXT_ENCODING)
         print('\r' + self.peer_name + ": " + plaintext, end='\n')
