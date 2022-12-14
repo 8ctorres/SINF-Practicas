@@ -205,13 +205,6 @@ class Messenger():
         # Al pulsar ENTER, iniciamos el proceso de intercambio de DH
         self.ratchet.start()
 
-        #Handler para la recepción de mensajes
-        def mqtt_recv_message(client,userdata,message):
-            self.receive(message.payload)
-
-        # Registramos handler MQTT
-        self.ratchet.mqclient.on_message = mqtt_recv_message
-
         # Interceptamos el Ctrl+C para cerrar el programa correctamente
         def sigint_handler(signum, frame):
             print("Exiting...")
@@ -221,6 +214,14 @@ class Messenger():
 
         # Registramos el handler con la librería de signals
         signal.signal(signal.SIGINT, sigint_handler)
+
+        #Handler para la recepción de mensajes
+        def mqtt_recv_message(client,userdata,message):
+            self.receive(message.payload)
+
+        # Registramos handler MQTT e iniciamos bucle de eventos
+        self.mqclient.on_message = mqtt_recv_message
+        self.mqclient.loop_start()
 
         # Bucle principal de la aplicación
         while True:
